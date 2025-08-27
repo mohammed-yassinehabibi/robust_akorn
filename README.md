@@ -4,6 +4,10 @@
 
 This repository contains a comprehensive framework for training an [AKOrN](https://github.com/autonomousvision/akorn) backbone architecture with different SSL architectures. The framework supports multiple datasets and SSL methods. An evaluation framework corresponding to the one of [RobustBench](https://robustbench.github.io/index.html) is also available and ready to run.
 
+## Results obtained 
+
+<img width="905" height="275" alt="tableau_resultats" src="https://github.com/user-attachments/assets/925fc95c-0173-4038-ba9e-d1a780742190" />
+
 ## 🚀 Quick Start
 
 ### Environment Setup

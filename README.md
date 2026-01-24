@@ -6,9 +6,10 @@ This repository contains a comprehensive framework for training an [AKOrN](https
 
 ## Results obtained 
 
-<img width="905" height="275" alt="tableau_resultats" src="https://github.com/user-attachments/assets/925fc95c-0173-4038-ba9e-d1a780742190" />
+<img width="1028" height="334" alt="results" src="https://github.com/user-attachments/assets/187b5100-92d0-4521-a133-b1a91b0ecb33" />
 
 ## 🚀 Quick Start
+
 
 ### Environment Setup
 

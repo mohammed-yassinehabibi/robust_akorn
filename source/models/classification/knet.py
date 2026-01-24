@@ -56,6 +56,7 @@ class AKOrN(nn.Module):
         global_omg=True,
         learn_omg=True,
         ensemble=1,
+        randomness=True
     ):
         super().__init__()
         
@@ -63,6 +64,7 @@ class AKOrN(nn.Module):
         self.n = n
         self.L = L
         self.ensemble = ensemble
+        self.randomness = randomness
         self.gamma = nn.Parameter(torch.tensor([gamma]), requires_grad=False)
         
         # Expand parameters to match number of layers
@@ -179,8 +181,10 @@ class AKOrN(nn.Module):
         """Extract features from input through the network layers."""
         # Initial processing
         c = self.conv0(self.rgb_normalize(inp))
-        x = torch.randn_like(c)
-        #x = torch.randn(size=c.shape, generator=torch.Generator().manual_seed(0)).to(c.device) #Remove randomness -> decrease adv acc
+        if self.randomness:
+            x = torch.randn_like(c) #Randomization
+        else:
+            x = torch.randn(size=c.shape, generator=torch.Generator().manual_seed(0)).to(c.device) #Remove randomness -> decrease adv acc
         xs, es = [], []
 
         # Process through each layer

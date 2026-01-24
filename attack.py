@@ -10,12 +10,12 @@ from source.models.classification.knet import AKOrN
 from source.evals.classification.adv_attacks import autoattack
 from tiny_imagenet_dataset import TinyImageNetDataset
 
-def get_backbone(backbone_name, ch=128, num_classes=10):
+def get_backbone(backbone_name, ch=128, n=2, L=3, T=3, num_classes=10, randomness=True):
     """Return the backbone model, similar to train_cifar10.py."""
     if backbone_name == 'akorn':
-        return AKOrN(n=2, ch=ch, out_classes=num_classes, L=3, T=3, J="conv", ksizes=[9,7,5], ro_ksize=3, ro_N=2,
+        return AKOrN(n=n, ch=ch, out_classes=num_classes, L=L, T=T, J="conv", ksizes=[9,7,5], ro_ksize=3, ro_N=2,
                      norm="bn", c_norm="gn", gamma=1.0, use_omega=True, init_omg=1.0, global_omg=True,
-                     learn_omg=True, ensemble=1)
+                     learn_omg=True, ensemble=1, randomness=randomness)
     else:
         raise ValueError(f"Unknown backbone: {backbone_name}")
 
@@ -53,7 +53,7 @@ def main():
         torch.manual_seed(seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
-    set_seed(0)
+    #set_seed(0)
     
     parser = argparse.ArgumentParser(description='Evaluate a fine-tuned model with AutoAttack.')
     parser.add_argument('--dataset', type=str, default='cifar10', choices=['cifar10', 'cifar100', 'tiny-imagenet'], 
@@ -67,6 +67,12 @@ def main():
     parser.add_argument('--ch', type=int, default=128, help='Channels for AKOrN backbone.')
     parser.add_argument('--batch_size', type=int, default=512, help='Batch size for loading data.')
     parser.add_argument('--attack_bs', type=int, default=100, help='Batch size for the AutoAttack.')
+    parser.add_argument('--randomness', type=bool, default=True, help='Random noise in the forward of AKOrN')
+    parser.add_argument('--n', type=int, default=2, help='occilator dimensions')
+    parser.add_argument('--T', type=int, default=3, help='timesteps')
+    parser.add_argument('--L', type=int, default=3, help='num of layers')
+    parser.add_argument('--finetune_epochs', type=int, default=400, help='Number of epochs for fine-tuning.')
+
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -85,13 +91,15 @@ def main():
     # Construct the model path from arguments
     model_name = f"{args.model_path}_{args.ssl_method}_{args.backbone}_{args.dataset}"
     if args.backbone == 'akorn':
-        model_name += f"_ch{args.ch}"
+        model_name += f"_ch{args.ch}_n{args.n}_T{args.T}_L{args.L}"
     model_name += f"_pretrain{args.pretrain_epochs}"
     model_filename = f"{model_name}_finetuned.pth"
 
     # --- Model Loading ---
-    net = get_backbone(args.backbone, ch=args.ch, num_classes=num_classes)
+    net = get_backbone(args.backbone, ch=args.ch, n=args.n, L=args.L, 
+                       T=args.T, num_classes=num_classes, randomness=args.randomness)
     net.load_state_dict(torch.load(model_filename, map_location=device))
+    net.randomness = args.randomness
     net.to(device)
     net.eval()
     print(f"Loaded fine-tuned model from {model_filename}")
@@ -117,7 +125,12 @@ def main():
         )
     else:
         raise ValueError(f"Unsupported dataset: {args.dataset}")
-        
+
+    print(f"Testset length: {len(testset)}")
+    if len(testset) == 0:
+        print('ERROR: Testset is empty! Check your dataset path and structure.')
+        return
+
     testloader = torch.utils.data.DataLoader(
         testset, batch_size=args.batch_size, shuffle=False, num_workers=1
     )
@@ -127,8 +140,12 @@ def main():
     images = []
     labels = []
     for img, lbl in testloader:
+        print(f"Loaded batch with shape: {img.shape}")
         images.append(img)
         labels.append(lbl)
+    if len(images) == 0:
+        print('ERROR: No batches loaded from testloader!')
+        return
     images = torch.cat(images, 0).to(device)
     labels = torch.cat(labels, 0).to(device)
 

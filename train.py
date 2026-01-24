@@ -66,6 +66,10 @@ def get_config():
     # Backbone-specific parameters
     parser.add_argument('--out_dim', type=int, default=2048, help='Output dimension for the projection head.')
     parser.add_argument('--ch', type=int, default=128, help='Channels for AKOrN backbone.')
+    parser.add_argument('--randomness', type=bool, default=True, help='Random noise in the forward of AKOrN')
+    parser.add_argument('--n', type=int, default=2, help='occilator dimensions')
+    parser.add_argument('--T', type=int, default=3, help='timesteps')
+    parser.add_argument('--L', type=int, default=3, help='num of layers')
 
     return parser.parse_args()
 
@@ -135,13 +139,13 @@ def get_dataloaders(args, for_pretraining=True):
         test_loader = DataLoader(testset, batch_size=args.finetune_bs, shuffle=False, num_workers=1, pin_memory=True)
         return train_loader, test_loader
 
-def get_backbone(backbone_name, ch=128, num_classes=10):
+def get_backbone(args, backbone_name, ch=128, num_classes=10):
     """Return the backbone model."""
     if backbone_name == 'akorn':
-        return AKOrN(n=2, ch=ch, out_classes=num_classes, L=3, T=3, J="conv", ksizes=[9,7,5], ro_ksize=3, ro_N=2,
+        return AKOrN(n=args.n, ch=ch, out_classes=num_classes, L=args.L, T=args.T, J="conv", ksizes=[9,7,5], ro_ksize=3, ro_N=2,
                      norm="bn", c_norm="gn", gamma=1.0, use_omega=True, init_omg=1.0, global_omg=True,
-                     learn_omg=True, ensemble=1)
-    elif backbone_name == 'resnet':
+                     learn_omg=True, ensemble=1, randomness=args.randomness)
+    elif backbone_name == 'rUnknown backboneesnet':
         model = resnet50(pretrained=False)
         model.fc = nn.Linear(model.fc.in_features, num_classes)
         return model
@@ -159,7 +163,7 @@ def get_ssl_model(args, device):
     else:
         raise ValueError(f"Unsupported dataset: {args.dataset}")
         
-    backbone = get_backbone(args.backbone, args.ch, num_classes)
+    backbone = get_backbone(args, args.backbone, args.ch, num_classes)
     if args.ssl_method == 'phinet':
         model = phinet.XPhiNetTF(backbone=backbone, out_dim=args.out_dim)
     elif args.ssl_method == 'simclr':
@@ -211,7 +215,7 @@ def pretrain(args, model, train_loader, device):
 
     model_name = f"{args.model_path}_{args.ssl_method}_{args.backbone}_{args.dataset}"
     if args.backbone == 'akorn':
-        model_name += f"_ch{args.ch}"
+        model_name += f"_ch{args.ch}_n{args.n}_T{args.T}_L{args.L}"
     model_name += f"_pretrain{args.pretrain_epochs}"
     save_path = f"{model_name}_pretrained.pth"
     
@@ -270,7 +274,7 @@ def finetune(args, model, train_loader, test_loader, device):
     
     model_name = f"{args.model_path}_{args.ssl_method}_{args.backbone}_{args.dataset}"
     if args.backbone == 'akorn':
-        model_name += f"_ch{args.ch}"
+        model_name += f"_ch{args.ch}_n{args.n}_T{args.T}_L{args.L}"
     model_name += f"_pretrain{args.pretrain_epochs}"
     save_path = f"{model_name}_finetuned.pth"
     torch.save(model.state_dict(), save_path)
@@ -283,7 +287,7 @@ def main():
         torch.manual_seed(seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
-    set_seed(0)
+    #set_seed(0)
     
     """Main execution function."""
     args = get_config()
@@ -308,12 +312,12 @@ def main():
         else:
             raise ValueError(f"Unsupported dataset: {args.dataset}")
             
-        finetune_model = get_backbone(args.backbone, args.ch, num_classes)
+        finetune_model = get_backbone(args, args.backbone, args.ch, num_classes)
         
         if args.load_from_pretrain:
             model_name = f"{args.model_path}_{args.ssl_method}_{args.backbone}_{args.dataset}"
             if args.backbone == 'akorn':
-                model_name += f"_ch{args.ch}"
+                model_name += f"_ch{args.ch}_n{args.n}_T{args.T}_L{args.L}"
             model_name += f"_pretrain{args.pretrain_epochs}"
             load_path = f"{model_name}_pretrained.pth"
             try:
@@ -338,6 +342,6 @@ def main():
 
         train_loader, test_loader = get_dataloaders(args, for_pretraining=False)
         finetune(args, finetune_model, train_loader, test_loader, device)
-
+        
 if __name__ == '__main__':
     main()

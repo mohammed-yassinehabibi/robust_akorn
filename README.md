@@ -62,12 +62,18 @@ python3 train.py \
     --load_from_pretrain \
     --ssl_method phinet \
     --backbone akorn \
-    --pretrain_epochs 400 \
-    --finetune_epochs 400 \
+    --pretrain_epochs 50 \
+    --finetune_epochs 50 \
     --pretrain_bs 512 \
     --finetune_bs 512 \
+    --pretrain_lr 1e-4 \
+    --finetune_lr 1e-4 \
+    --out_dim 2048 \
     --ch 128 \
-    --out_dim 2048
+    --randomness True \
+    --n 4 \
+    --T 5 \
+    --L 3
 ```
 
 ### Step 2: Evaluating Model Robustness
@@ -75,14 +81,18 @@ python3 train.py \
 After training, evaluate the model's adversarial robustness using AutoAttack:
 
 ```bash
-python3 attack.py \
-    --dataset cifar10 \
+python -u attack.py \
     --ssl_method phinet \
     --backbone akorn \
-    --pretrain_epochs 100 \
+    --attack_bs 100 \
+    --pretrain_epochs 50 \
+    --finetune_epochs 50 \
     --ch 128 \
-    --batch_size 256 \
-    --attack_bs 100
+    --dataset cifar10 \
+    --randomness True \
+    --n 4 \
+    --T 5 \
+    --L 3
 ```
 
 ## 🎛️ Key Parameters

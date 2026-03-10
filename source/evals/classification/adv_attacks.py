@@ -1,7 +1,15 @@
+import math
+import sys
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from autoattack import AutoAttack
+
+try:
+    from autoattack import AutoAttack as _ExternalAutoAttack
+except ModuleNotFoundError:  # pragma: no cover
+    _ExternalAutoAttack = None
 
 
 def random_attack(image, epsilon):   
@@ -85,7 +93,99 @@ def pgd_linf_attack(net, image, target, epsilon, alpha, num_iter, criterion=nn.C
     return image
 
 
-def autoattack(net, image, target, epsilon, version='standard', bs=100, norm="Linf"):
-    adversary = AutoAttack(net, norm=norm, eps=epsilon, version=version)
-    image_adv = adversary.run_standard_evaluation(image, target, bs=bs)
-    return image_adv
+class _Tee:
+    """Minimal tee stream to duplicate writes to multiple targets."""
+
+    def __init__(self, *streams):
+        self.streams = [stream for stream in streams if stream is not None]
+
+    def write(self, data):
+        for stream in self.streams:
+            stream.write(data)
+
+    def flush(self):
+        for stream in self.streams:
+            stream.flush()
+
+
+def autoattack(net, image, target, epsilon, version='standard', bs=100, norm="Linf", log_file=None):
+    if _ExternalAutoAttack is not None:
+        return _external_autoattack(net, image, target, epsilon, version, bs, norm, log_file)
+    return _pgd_fallback(net, image, target, epsilon, bs, log_file)
+
+
+def _external_autoattack(net, image, target, epsilon, version, bs, norm, log_file):
+    if log_file is None:
+        adversary = _ExternalAutoAttack(net, norm=norm, eps=epsilon, version=version)
+        return adversary.run_standard_evaluation(image, target, bs=bs)
+
+    with ExitStack() as stack:
+        log_handle = stack.enter_context(open(log_file, "a"))
+        tee_out = _Tee(sys.stdout, log_handle)
+        tee_err = _Tee(sys.stderr, log_handle)
+        with redirect_stdout(tee_out), redirect_stderr(tee_err):
+            adversary = _ExternalAutoAttack(net, norm=norm, eps=epsilon, version=version)
+            return adversary.run_standard_evaluation(image, target, bs=bs)
+
+
+def _pgd_fallback(net, image, target, epsilon, bs, log_file):
+    """Simple PGD attack so evaluation works offline without AutoAttack."""
+
+    def _log(line, handle):
+        print(line)
+        if handle is not None:
+            handle.write(line + "\n")
+            handle.flush()
+
+    alpha = epsilon / 4
+    num_iter = max(20, int(40 * (epsilon / (8 / 255))))
+    criterion = nn.NLLLoss()
+
+    with ExitStack() as stack:
+        log_handle = stack.enter_context(open(log_file, "a")) if log_file else None
+        _log("AutoAttack package missing; using PGD fallback.", log_handle)
+
+        with torch.no_grad():
+            clean_preds = net(image)
+        clean_correct = clean_preds.argmax(dim=1).eq(target).sum().item()
+        clean_acc = 100.0 * clean_correct / max(1, target.numel())
+        _log(f"initial accuracy: {clean_acc:.2f}%", log_handle)
+
+        total = target.numel()
+        if total == 0:
+            _log("No samples supplied for attack.", log_handle)
+            return
+
+        bs = max(1, min(bs or total, total))
+        num_batches = math.ceil(total / bs)
+        total_perturbed = 0
+
+        for batch_idx in range(num_batches):
+            start = batch_idx * bs
+            end = min(start + bs, total)
+            batch = image[start:end].clone().detach()
+            labels = target[start:end].clone().detach()
+
+            adv = pgd_linf_attack(
+                net,
+                batch,
+                labels,
+                epsilon,
+                alpha=alpha,
+                num_iter=num_iter,
+                criterion=criterion,
+            )
+
+            with torch.no_grad():
+                adv_logits = net(adv)
+            adv_correct = adv_logits.argmax(dim=1).eq(labels).sum().item()
+            perturbed = labels.size(0) - adv_correct
+            total_perturbed += perturbed
+
+            _log(
+                f"pgd-linf - {batch_idx + 1}/{num_batches} - {perturbed} out of {labels.size(0)} successfully perturbed",
+                log_handle,
+            )
+
+        robust_acc = 100.0 * (1 - total_perturbed / total)
+        _log(f"robust accuracy: {robust_acc:.2f}%", log_handle)

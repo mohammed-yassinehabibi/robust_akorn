@@ -38,6 +38,11 @@ def set_seed(seed):
     except Exception:
         pass
 
+def format_suffix(value):
+    """Format float hyper-parameters for filenames (e.g., 0.5 -> 0p5)."""
+    text = str(value)
+    return text.replace('.', 'p') if '.' in text else text
+
 def get_config():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description='Modular SSL Training Script')
@@ -94,6 +99,14 @@ def get_config():
     parser.add_argument('--n', type=int, default=2, help='occilator dimensions')
     parser.add_argument('--T', type=int, default=3, help='timesteps')
     parser.add_argument('--L', type=int, default=3, help='num of layers')
+    parser.add_argument('--mse_loss_ratio', type=float, default=1.0,
+                        help='PhiNet MSE loss ratio used during SSL training.')
+    parser.add_argument('--ori_loss_ratio', type=float, default=0.0,
+                        help='PhiNet orientation loss ratio used during SSL training.')
+    parser.add_argument('--beta', type=float, default=0.99,
+                        help='EMA beta used for PhiNet slow encoder updates.')
+    parser.add_argument('--pretrain_weight_decay', type=float, default=0.0,
+                        help='Weight decay applied to the pre-training optimizer.')
 
     args = parser.parse_args()
 
@@ -255,7 +268,13 @@ def get_ssl_model(args, device):
         
     backbone = get_backbone(args, args.backbone, args.ch, num_classes)
     if args.ssl_method == 'phinet':
-        model = phinet.XPhiNetTF(backbone=backbone, out_dim=args.out_dim)
+        model = phinet.XPhiNetTF(
+            backbone=backbone,
+            out_dim=args.out_dim,
+            mse_loss_ratio=args.mse_loss_ratio,
+            ori_loss_ratio=args.ori_loss_ratio,
+            beta=args.beta,
+        )
     elif args.ssl_method == 'simclr':
         model = simclr.SimCLR(backbone)
     elif args.ssl_method == 'simsiam':
@@ -269,7 +288,7 @@ def get_ssl_model(args, device):
 def pretrain(args, model, train_loader, device, wandb_run=None):
     """Pre-training loop."""
     print(f"--- Starting Pre-training with {args.ssl_method} ---")
-    optimizer = optim.Adam(model.parameters(), lr=args.pretrain_lr)
+    optimizer = optim.Adam(model.parameters(), lr=args.pretrain_lr, weight_decay=args.pretrain_weight_decay)
     
     # Ensure model directory exists
     model_dir = os.path.dirname(args.model_path)
@@ -312,6 +331,12 @@ def pretrain(args, model, train_loader, device, wandb_run=None):
     model_name = f"{args.model_path}_{args.ssl_method}_{args.backbone}_{args.dataset}"
     if args.backbone == 'akorn':
         model_name += f"_ch{args.ch}_n{args.n}_T{args.T}_L{args.L}"
+    if args.mse_loss_ratio is not None:
+        model_name += f"_mse{format_suffix(args.mse_loss_ratio)}"
+    if args.ori_loss_ratio is not None:
+        model_name += f"_ori{format_suffix(args.ori_loss_ratio)}"
+    if args.beta is not None:
+        model_name += f"_beta{format_suffix(args.beta)}"
     model_name += f"_pretrain{args.pretrain_epochs}"
     save_path = f"{model_name}_pretrained.pth"
     
@@ -386,8 +411,14 @@ def finetune(args, model, train_loader, test_loader, device, wandb_run=None):
     model_name = f"{args.model_path}_{args.ssl_method}_{args.backbone}_{args.dataset}"
     if args.backbone == 'akorn':
         model_name += f"_ch{args.ch}_n{args.n}_T{args.T}_L{args.L}"
+    if args.mse_loss_ratio is not None:
+        model_name += f"_mse{format_suffix(args.mse_loss_ratio)}"
+    if args.ori_loss_ratio is not None:
+        model_name += f"_ori{format_suffix(args.ori_loss_ratio)}"
+    if args.beta is not None:
+        model_name += f"_beta{format_suffix(args.beta)}"
     model_name += f"_pretrain{args.pretrain_epochs}"
-    save_path = f"{model_name}_finetuned.pth"
+    save_path = f"{model_name}_finetuned{args.finetune_epochs}.pth"
     torch.save(model.state_dict(), save_path)
     print(f"Fine-tuned model saved to {save_path}")
     writer.close()

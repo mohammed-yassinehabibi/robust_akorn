@@ -213,6 +213,9 @@ class XPhiNetTF(nn.Module):
            else:
               L_mse = Dnsg(q1, z_ori) / 2 + Dnsg(q2,z_ori)/2
 
-        L = L_sim + L_mse
+        # Allow optional weighting of the cosine/orientation and mse objectives.
+        mse_coef = 1.0 if getattr(self, 'mse_loss_ratio', None) is None else self.mse_loss_ratio
+        ori_coef = 1.0 if getattr(self, 'ori_loss_ratio', None) is None else self.ori_loss_ratio
+        L = ori_coef * L_sim + mse_coef * L_mse
         self.slow_encoder = ema_model(self.slow_encoder, self.encoder, self.beta)
         return {'loss': L, 'loss_cos': L_sim, 'loss_mse': L_mse}
